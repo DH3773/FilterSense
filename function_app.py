@@ -4,43 +4,42 @@ from filter_services import apply_filter_to_image
 
 app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 
+def parse_request(req: func.HttpRequest) -> FilterRequest:
+    filter_type = req.form.get('filter')
+    image_file = req.files.get('image')
+    
+    if not filter_type or not image_file:
+        raise ValueError("Missing filter or image")
+    
+    try:
+        return FilterRequest(filter=filter_type, image_data=image_file)
+    except ValidationError as e:
+        raise ValueError(f"Invalid request: {e}")
+
 @app.route(route="apply_filter")
 def apply_filter(req: func.HttpRequest) -> func.HttpResponse:
     logging.info('Python HTTP trigger function processed a request.')
-
-    # Get the filter from the query string or request body
-    filter = req.params.get('filter')
-    if not filter:
-        try:
-            req_body = req.get_json()
-        except ValueError:
-            return func.HttpResponse(
-                "Please select a filter",
-                status_code=400
-            )
-        else:
-            filter = req_body.get('filter')
-
-    # Get the image from the request or return an error if not found
-    image_file = req.files.get('image')
-    if not image_file:
-        return func.HttpResponse(
-            "Please upload an image",
-            status_code=400
-        )
     
-    # Read the image data from the file pointer
-    image_data = image_file.read()
+    try:
+        # Parse and validate the request using the Pydantic model
+        filter_request = parse_request(req)
+        
+        filtered_image_data = apply_filter_to_image(
+            filter_request.image_data, 
+            filter_request.filter
+        )
 
-    # Apply the filter to the image
-    filtered_image_data = apply_filter_to_image(image_data, filter)
+        return func.HttpResponse(
+            filtered_image_data,
+            status_code=200,
+            mimetype='image/jpeg'  # Adjust mimetype if needed
+        )
 
-    # Return the filtered image
-    return func.HttpResponse(
-        filtered_image_data,
-        status_code=200,
-        mimetype='image/jpeg' # Make sure to set the correct MIME type
-    )
+    except ValueError as e:
+        return func.HttpResponse(str(e), status_code=400)
+    except Exception as e:
+        logging.error(f"An error occurred: {str(e)}")
+        return func.HttpResponse("An internal server error occurred", status_code=500)
 
 
 
